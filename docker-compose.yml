@@ -1,0 +1,60 @@
+services:
+  # ==========================================
+  # API Backend (Spring Boot)
+  # ==========================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ep2-backend-despacho:latest
+    container_name: innovatech-backend-despacho
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_ENDPOINT=db
+      - DB_PORT=3306
+      - DB_NAME=${DB_NAME:-innovatech_despachos}
+      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-mysql123}
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - innovatech-network
+
+  # ==========================================
+  # Base de datos MySQL
+  # ==========================================
+  db:
+    image: mysql:8.0
+    container_name: innovatech-db-despacho
+    environment:
+      - MYSQL_DATABASE=${DB_NAME:-innovatech_despachos}
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-mysql123}
+      - MYSQL_USER=${DB_USERNAME:-appuser}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-mysql123}
+    ports:
+      - "3306:3306"
+    # Named volume: los datos persisten aunque el contenedor se elimine
+    # Named volume vs bind mount: más portable, no depende de ruta del host
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-mysql123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - innovatech-network
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  innovatech-network:
+    driver: bridge
