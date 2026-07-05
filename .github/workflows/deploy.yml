@@ -9,11 +9,13 @@ env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
   ECR_REPOSITORY: ep2-backend-despacho
+  ECS_CLUSTER: innovatech-cluster
+  ECS_SERVICE: innovatech-backend-service
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   build-and-deploy:
-    name: Build, Push y Deploy Backend
+    name: Build, Push y Deploy Backend a ECS
     runs-on: ubuntu-latest
 
     steps:
@@ -47,72 +49,23 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Deploy en EC2 Backend
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST_BACKEND }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-            aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            aws configure set aws_session_token ${{ secrets.AWS_SESSION_TOKEN }}
-            aws configure set default.region ${{ env.AWS_REGION }}
+      - name: Forzar nuevo despliegue en ECS
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment
 
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-              docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+      - name: Esperar a que el servicio se estabilice
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
 
-            docker pull ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
-
-            mkdir -p /home/ec2-user/innovatech-backend
-            cd /home/ec2-user/innovatech-backend
-
-            cat > docker-compose.yml << 'COMPOSE_EOF'
-            services:
-              backend:
-                image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
-                container_name: innovatech-backend-despacho
-                ports:
-                  - "8081:8081"
-                environment:
-                  - DB_ENDPOINT=db
-                  - DB_PORT=3306
-                  - DB_NAME=innovatech_despachos
-                  - DB_USERNAME=root
-                  - DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-                depends_on:
-                  db:
-                    condition: service_healthy
-                restart: unless-stopped
-                networks:
-                  - innovatech-network
-              db:
-                image: mysql:8.0
-                container_name: innovatech-db-despacho
-                environment:
-                  - MYSQL_DATABASE=innovatech_despachos
-                  - MYSQL_ROOT_PASSWORD=${{ secrets.DB_PASSWORD }}
-                volumes:
-                  - mysql_data:/var/lib/mysql
-                healthcheck:
-                  test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${{ secrets.DB_PASSWORD }}"]
-                  interval: 10s
-                  timeout: 5s
-                  retries: 5
-                  start_period: 30s
-                restart: unless-stopped
-                networks:
-                  - innovatech-network
-            volumes:
-              mysql_data:
-                driver: local
-            networks:
-              innovatech-network:
-                driver: bridge
-            COMPOSE_EOF
-
-            docker compose down || true
-            docker compose up -d
-
-            echo "✅ Backend Despachos desplegado correctamente"
-            docker compose ps
+      - name: Confirmar estado final
+        run: |
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount}" \
+            --output table

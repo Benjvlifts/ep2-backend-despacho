@@ -14,7 +14,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.net.URI;
 import java.util.List;
 
-@CrossOrigin(origins = "*")
+@CrossOrigin(origins = "http://innovatech-alb-frontend-336024561.us-east-1.elb.amazonaws.com")
 @RestController
 @RequestMapping("api/v1/despachos")
 @Tag(name = "Despacho", description = "Controlador para gestionar despachos")
